@@ -1,0 +1,8 @@
+{
+  "name": "kasapdev/php-cache-lite",
+  "description": "A lightweight, dependency-free PSR-16-shaped caching library for PHP with in-memory and file-based backends.",
+  "type": "library",
+  "license": "MIT",
+  "require": {"php": ">=8.1"},
+  "autoload": {"psr-4": {"Kasapdev\\CacheLite\\": "src/"}}
+}
