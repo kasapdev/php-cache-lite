@@ -1,6 +1,6 @@
 # PHP Cache Lite
 
-[![CI](https://github.com/kasapdev/php-cache-lite/actions/workflows/ci.yml/badge.svg)](https://github.com/kasapdev/php-cache-lite/actions/workflows/ci.yml)
+[![CI](https://github.com/kasapdev/php-cache-lite/actions/workflows/ci.yml/badge.svg)](https://github.com/kasapdev/php-cache-lite/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![PHP](https://img.shields.io/badge/PHP-8.1%2B-777BB4?logo=php&logoColor=white)
 
 A lightweight, dependency-free PSR-16-shaped caching library for PHP with in-memory and file-based backends. `Kasapdev\CacheLite\CacheInterface` mirrors the method signatures of `psr/simple-cache`'s `CacheInterface` so it feels drop-in familiar, but this library has zero external dependencies — it does not require `psr/simple-cache` and does not implement its interface directly. Two backends ship out of the box: `ArrayCache` for fast in-process caching that lives only for the current request, and `FileCache` for a simple persistent cache backed by one JSON file per key.
 
