@@ -238,6 +238,68 @@ $autoCreateCache->set('k', 'v');
 check('FileCache: cache in an auto-created directory is functional', $autoCreateCache->get('k') === 'v');
 
 // ---------------------------------------------------------------------
+// FileCache: corrupted / malformed on-disk JSON is treated as a miss.
+// ---------------------------------------------------------------------
+
+$corruptDir = $tmpBaseDir . DIRECTORY_SEPARATOR . 'corrupt-check';
+$corruptCache = new FileCache($corruptDir);
+$corruptCache->set('corrupt-me', 'original-value', null);
+$corruptPath = $corruptDir . DIRECTORY_SEPARATOR . sha1('corrupt-me') . '.json';
+file_put_contents($corruptPath, 'not valid json {{{');
+
+check('FileCache: get() on a file with corrupted JSON content returns the default, not an error', $corruptCache->get('corrupt-me', 'FALLBACK') === 'FALLBACK');
+check('FileCache: has() on a file with corrupted JSON content returns false', $corruptCache->has('corrupt-me') === false);
+
+// A JSON file that decodes fine but is missing the expected shape (no "value"/"expiresAt") is also a miss.
+$shapelessPath = $corruptDir . DIRECTORY_SEPARATOR . sha1('shapeless') . '.json';
+file_put_contents($shapelessPath, json_encode(['unexpected' => 'shape']));
+check('FileCache: get() on a JSON file missing value/expiresAt keys returns the default', $corruptCache->get('shapeless', 'FALLBACK') === 'FALLBACK');
+check('FileCache: has() on a JSON file missing value/expiresAt keys returns false', $corruptCache->has('shapeless') === false);
+
+// ---------------------------------------------------------------------
+// DateInterval with invert=1 represents a past point in time and is
+// therefore already expired, just like a negative integer ttl.
+// ---------------------------------------------------------------------
+
+foreach (makeBackends($tmpBaseDir) as [$name, $cache]) {
+    $pastInterval = new DateInterval('PT1H');
+    $pastInterval->invert = 1;
+    $cache->set('inverted-interval', 'value', $pastInterval);
+    check("$name: a DateInterval with invert=1 (a past interval) is treated as already expired", $cache->has('inverted-interval') === false);
+    check("$name: get() for an inverted-interval key returns the default", $cache->get('inverted-interval', 'GONE') === 'GONE');
+}
+
+// ---------------------------------------------------------------------
+// getMultiple() / setMultiple() work with a real Generator, not just arrays
+// (the interface is declared as `iterable`, not `array`).
+// ---------------------------------------------------------------------
+
+function genValues(): Generator
+{
+    yield 'gen-a' => 'A';
+    yield 'gen-b' => 'B';
+}
+
+function genKeys(): Generator
+{
+    yield 'gen-a';
+    yield 'gen-b';
+    yield 'gen-missing';
+}
+
+foreach (makeBackends($tmpBaseDir) as [$name, $cache]) {
+    $genSetResult = $cache->setMultiple(genValues());
+    check("$name: setMultiple() accepts a Generator, not just an array", $genSetResult === true);
+
+    $genGot = $cache->getMultiple(genKeys(), 'N/A');
+    $genGotArray = is_array($genGot) ? $genGot : iterator_to_array($genGot);
+    check(
+        "$name: getMultiple() accepts a Generator of keys and returns correct values",
+        $genGotArray['gen-a'] === 'A' && $genGotArray['gen-b'] === 'B' && $genGotArray['gen-missing'] === 'N/A'
+    );
+}
+
+// ---------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------
 
