@@ -64,6 +64,48 @@ $cache->deleteMultiple(['a', 'b']);
 $cache->clear();
 ```
 
+### A more realistic end-to-end example
+
+A typical read-through pattern: check the cache first, fall back to the
+expensive source on a miss, then store the result for next time.
+
+```php
+<?php
+
+require_once __DIR__ . '/src/CacheInterface.php';
+require_once __DIR__ . '/src/TtlNormalizer.php';
+require_once __DIR__ . '/src/FileCache.php';
+
+use Kasapdev\CacheLite\FileCache;
+
+function fetchUserProfile(FileCache $cache, int $userId): array
+{
+    $key = "user:$userId:profile";
+
+    $profile = $cache->get($key);
+
+    if ($profile !== null) {
+        return $profile; // cache hit, skip the expensive lookup entirely
+    }
+
+    // Simulate an expensive lookup (a database query, an API call, ...).
+    $profile = ['id' => $userId, 'name' => 'Ada Lovelace', 'plan' => 'pro'];
+
+    // Cache it for 10 minutes, tagged so it can be bulk-invalidated later
+    // (see "Tag-Based Invalidation" below) whenever this user's data changes.
+    $cache->set($key, $profile, 600, tags: ["user:$userId"]);
+
+    return $profile;
+}
+
+$cache = new FileCache(__DIR__ . '/var/cache');
+
+$profile = fetchUserProfile($cache, 42); // populates the cache
+$profileAgain = fetchUserProfile($cache, 42); // served straight from cache
+
+var_dump($profile === $profileAgain); // true
+```
+
 ### FileCache (persistent, one JSON file per key)
 
 ```php
@@ -100,7 +142,50 @@ $cache->deleteMultiple(['x', 'y']);
 $cache->clear();
 ```
 
-Each entry is stored under `$directory` as `sha1($key) . '.json'`, with a body shaped like `{"value": ..., "expiresAt": <timestamp-or-null>}`. Hashing the key guarantees the filename is always filesystem-safe and collision-resistant, no matter what characters the original key contains. When an expired entry is discovered during `get()` or `has()`, its backing file is deleted immediately.
+Each entry is stored under `$directory` as `sha1($key) . '.json'`, with a body shaped like `{"value": ..., "expiresAt": <timestamp-or-null>, "tags": [...]}`. Hashing the key guarantees the filename is always filesystem-safe and collision-resistant, no matter what characters the original key contains. When an expired entry is discovered during `get()` or `has()`, its backing file is deleted immediately.
+
+## Tag-Based Invalidation
+
+Both backends support tagging entries at write time and invalidating every
+entry that carries a given tag in one call, without having to track the
+individual keys yourself. Pass an optional `tags` list to `set()`, then call
+`invalidateTag()` to remove everything tagged with it:
+
+```php
+<?php
+
+require_once __DIR__ . '/src/CacheInterface.php';
+require_once __DIR__ . '/src/TtlNormalizer.php';
+require_once __DIR__ . '/src/ArrayCache.php';
+
+use Kasapdev\CacheLite\ArrayCache;
+
+$cache = new ArrayCache();
+
+// Tag related entries so they can be invalidated together later.
+$cache->set('user:42:profile', ['name' => 'Ada Lovelace'], null, tags: ['user:42']);
+$cache->set('user:42:settings', ['theme' => 'dark'], null, tags: ['user:42', 'settings']);
+$cache->set('user:99:profile', ['name' => 'Grace Hopper'], null, tags: ['user:99']);
+
+// Something changed about user 42 (e.g. they updated their profile) — drop
+// every cache entry tagged with their id in a single call.
+$removed = $cache->invalidateTag('user:42');
+
+var_dump($removed); // int(2)
+var_dump($cache->has('user:42:profile')); // false
+var_dump($cache->has('user:42:settings')); // false
+
+// Entries tagged differently (or not at all) are untouched.
+var_dump($cache->has('user:99:profile')); // true
+```
+
+`tags` defaults to an empty array, so existing `set()` calls that don't pass
+it behave exactly as before — tagging is entirely opt-in and does not affect
+untagged entries or normal TTL-based expiry. `invalidateTag()` returns the
+number of entries it removed, `0` if nothing matched. On `FileCache`, tags
+are persisted as part of each entry's JSON body and `invalidateTag()` scans
+the cache directory's files to find and delete the matching ones; on
+`ArrayCache`, it's a simple scan over the in-memory entries.
 
 ## API
 
@@ -109,13 +194,14 @@ Each entry is stored under `$directory` as `sha1($key) . '.json'`, with a body s
 | Method | Description |
 | --- | --- |
 | `get(string $key, mixed $default = null): mixed` | Fetch a value, or `$default` on miss/expiry. |
-| `set(string $key, mixed $value, null\|int\|\DateInterval $ttl = null): bool` | Store a value. `$ttl = null` means never expires; `0` or negative means immediately expired. |
+| `set(string $key, mixed $value, null\|int\|\DateInterval $ttl = null, array $tags = []): bool` | Store a value. `$ttl = null` means never expires; `0` or negative means immediately expired. `$tags` optionally names this entry for later bulk removal via `invalidateTag()`. |
 | `delete(string $key): bool` | Remove a key. Returns `true` even if the key didn't exist. |
 | `has(string $key): bool` | Whether a non-expired value exists for the key. |
 | `clear(): bool` | Remove every entry. |
 | `getMultiple(iterable $keys, mixed $default = null): iterable` | Fetch several values at once, keyed by the original keys. |
 | `setMultiple(iterable $values, null\|int\|\DateInterval $ttl = null): bool` | Store several `key => value` pairs at once with a shared TTL. |
 | `deleteMultiple(iterable $keys): bool` | Remove several keys at once. |
+| `invalidateTag(string $tag): int` | Remove every entry stored with the given tag. Returns the number of entries removed. |
 
 ### `Kasapdev\CacheLite\ArrayCache`
 
@@ -141,7 +227,7 @@ This library ships with a single, dependency-free test script (no PHPUnit requir
 php tests/run.php
 ```
 
-It exercises both backends across basic get/set/delete/has, TTL semantics (including `ttl = 0`, negative TTLs, `DateInterval` TTLs, and real timing-based expiry), bulk operations (`getMultiple`/`setMultiple`/`deleteMultiple`), `clear()`, and `FileCache`'s on-disk file lifecycle (including that expired files are deleted the moment they're discovered). A successful run ends with `All tests passed.` and exit code `0`.
+It exercises both backends across basic get/set/delete/has, TTL semantics (including `ttl = 0`, negative TTLs, `DateInterval` TTLs, and real timing-based expiry), bulk operations (`getMultiple`/`setMultiple`/`deleteMultiple`), `clear()`, tag-based invalidation (`invalidateTag()` on both backends, including `FileCache`'s on-disk file removal), and `FileCache`'s on-disk file lifecycle (including that expired files are deleted the moment they're discovered). A successful run ends with `All tests passed.` and exit code `0`.
 
 ## License
 

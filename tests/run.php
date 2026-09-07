@@ -300,6 +300,62 @@ foreach (makeBackends($tmpBaseDir) as [$name, $cache]) {
 }
 
 // ---------------------------------------------------------------------
+// Tag-based invalidation
+// ---------------------------------------------------------------------
+
+foreach (makeBackends($tmpBaseDir) as [$name, $cache]) {
+    $cache->set('user:42:profile', ['name' => 'Ada'], null, ['user:42']);
+    $cache->set('user:42:settings', ['theme' => 'dark'], null, ['user:42', 'settings']);
+    $cache->set('user:99:profile', ['name' => 'Grace'], null, ['user:99']);
+
+    check(
+        "$name: tagged entries exist before invalidateTag()",
+        $cache->has('user:42:profile') && $cache->has('user:42:settings') && $cache->has('user:99:profile')
+    );
+
+    $invalidatedCount = $cache->invalidateTag('user:42');
+    check("$name: invalidateTag() returns the number of removed entries", $invalidatedCount === 2);
+
+    check("$name: invalidateTag() removes the first tagged entry (has)", $cache->has('user:42:profile') === false);
+    check("$name: invalidateTag() removes the first tagged entry (get)", $cache->get('user:42:profile') === null);
+    check("$name: invalidateTag() removes the second tagged entry (has)", $cache->has('user:42:settings') === false);
+    check("$name: invalidateTag() removes the second tagged entry (get)", $cache->get('user:42:settings') === null);
+
+    check(
+        "$name: invalidateTag() leaves an untagged-for-that-tag entry intact",
+        $cache->has('user:99:profile') === true && $cache->get('user:99:profile') === ['name' => 'Grace']
+    );
+
+    // Invalidating a tag with no matching entries removes nothing.
+    check("$name: invalidateTag() on an unused tag returns 0", $cache->invalidateTag('no-such-tag') === 0);
+
+    // Entries set without a tags argument default to no tags and are unaffected.
+    $cache->set('untagged', 'plain-value');
+    check("$name: untagged entries are unaffected by invalidateTag()", $cache->invalidateTag('user:99') === 1);
+    check("$name: untagged entry survives an unrelated invalidateTag() call", $cache->get('untagged') === 'plain-value');
+}
+
+// FileCache: invalidateTag() actually deletes the backing files on disk.
+$tagFileCacheDir = $tmpBaseDir . DIRECTORY_SEPARATOR . 'tag-check';
+$tagFileCache = new FileCache($tagFileCacheDir);
+$tagFileCache->set('post:1', 'a', null, ['category:news']);
+$tagFileCache->set('post:2', 'b', null, ['category:news']);
+$tagFileCache->set('post:3', 'c', null, ['category:sports']);
+
+$post1Path = $tagFileCacheDir . DIRECTORY_SEPARATOR . sha1('post:1') . '.json';
+$post2Path = $tagFileCacheDir . DIRECTORY_SEPARATOR . sha1('post:2') . '.json';
+$post3Path = $tagFileCacheDir . DIRECTORY_SEPARATOR . sha1('post:3') . '.json';
+check('FileCache: backing files for tagged entries exist before invalidateTag()', is_file($post1Path) && is_file($post2Path) && is_file($post3Path));
+
+$tagRemovedCount = $tagFileCache->invalidateTag('category:news');
+check('FileCache: invalidateTag() returns the number of removed entries', $tagRemovedCount === 2);
+check('FileCache: invalidateTag() deletes the backing files for matching entries', !is_file($post1Path) && !is_file($post2Path));
+check('FileCache: invalidateTag() leaves the backing file for a non-matching entry', is_file($post3Path));
+check('FileCache: the surviving entry is still retrievable with its original value', $tagFileCache->get('post:3') === 'c');
+
+rrmdir($tagFileCacheDir);
+
+// ---------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------
 

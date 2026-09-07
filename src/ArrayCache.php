@@ -11,14 +11,16 @@ namespace Kasapdev\CacheLite;
  * this instance (backed by a private array property). Each entry stores an
  * absolute expiry Unix timestamp computed at set-time (time() + ttl), rather
  * than the raw ttl itself. Expired entries are treated as absent on every
- * access (get/has), regardless of whether any cleanup pass has run.
+ * access (get/has), regardless of whether any cleanup pass has run. Each
+ * entry also stores the list of tags (if any) it was set with, so that
+ * invalidateTag() can remove every entry carrying a given tag.
  */
 final class ArrayCache implements CacheInterface
 {
     use TtlNormalizer;
 
     /**
-     * @var array<string, array{value: mixed, expiresAt: int|null}>
+     * @var array<string, array{value: mixed, expiresAt: int|null, tags: string[]}>
      */
     private array $items = [];
 
@@ -31,11 +33,12 @@ final class ArrayCache implements CacheInterface
         return $this->items[$key]['value'];
     }
 
-    public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null): bool
+    public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null, array $tags = []): bool
     {
         $this->items[$key] = [
             'value' => $value,
             'expiresAt' => $this->ttlToExpiresAt($ttl),
+            'tags' => $tags,
         ];
 
         return true;
@@ -103,5 +106,19 @@ final class ArrayCache implements CacheInterface
         }
 
         return $success;
+    }
+
+    public function invalidateTag(string $tag): int
+    {
+        $removed = 0;
+
+        foreach ($this->items as $key => $item) {
+            if (in_array($tag, $item['tags'], true)) {
+                unset($this->items[$key]);
+                $removed++;
+            }
+        }
+
+        return $removed;
     }
 }

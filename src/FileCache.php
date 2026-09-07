@@ -13,7 +13,7 @@ namespace Kasapdev\CacheLite;
  * `sha1($key) . '.json'`, so two different keys never collide with the
  * filesystem's naming restrictions and directory separators in a key can
  * never cause a path traversal. Each file's JSON body is shaped like:
- * `{"value": ..., "expiresAt": <timestamp-or-null>}`.
+ * `{"value": ..., "expiresAt": <timestamp-or-null>, "tags": [...]}`.
  *
  * When a get()/has() call discovers that a stored entry is expired, the
  * backing file is deleted immediately as part of that call.
@@ -46,11 +46,12 @@ final class FileCache implements CacheInterface
         return $entry['value'];
     }
 
-    public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null): bool
+    public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null, array $tags = []): bool
     {
         $payload = [
             'value' => $value,
             'expiresAt' => $this->ttlToExpiresAt($ttl),
+            'tags' => $tags,
         ];
 
         $encoded = json_encode($payload, JSON_THROW_ON_ERROR);
@@ -121,6 +122,28 @@ final class FileCache implements CacheInterface
         return $success;
     }
 
+    public function invalidateTag(string $tag): int
+    {
+        $removed = 0;
+
+        foreach (glob($this->directory . DIRECTORY_SEPARATOR . '*.json') ?: [] as $file) {
+            $decoded = $this->decodeFile($file);
+
+            if ($decoded === null) {
+                continue;
+            }
+
+            /** @var string[] $tags */
+            $tags = is_array($decoded['tags'] ?? null) ? $decoded['tags'] : [];
+
+            if (in_array($tag, $tags, true) && unlink($file)) {
+                $removed++;
+            }
+        }
+
+        return $removed;
+    }
+
     /**
      * Reads and decodes the entry for $key, transparently deleting and
      * treating it as absent if it has expired or is corrupt/missing.
@@ -135,6 +158,32 @@ final class FileCache implements CacheInterface
             return null;
         }
 
+        $decoded = $this->decodeFile($path);
+
+        if ($decoded === null) {
+            return null;
+        }
+
+        /** @var int|null $expiresAt */
+        $expiresAt = $decoded['expiresAt'];
+
+        if ($this->isExpired($expiresAt)) {
+            unlink($path);
+            return null;
+        }
+
+        return ['value' => $decoded['value'], 'expiresAt' => $expiresAt];
+    }
+
+    /**
+     * Reads and decodes the raw JSON body of a cache file, without regard
+     * to expiry. Returns null if the file is missing, unreadable, not
+     * valid JSON, or does not have the expected shape.
+     *
+     * @return array{value: mixed, expiresAt: int|null, tags?: string[]}|null
+     */
+    private function decodeFile(string $path): ?array
+    {
         $contents = file_get_contents($path);
 
         if ($contents === false || $contents === '') {
@@ -151,15 +200,7 @@ final class FileCache implements CacheInterface
             return null;
         }
 
-        /** @var int|null $expiresAt */
-        $expiresAt = $decoded['expiresAt'];
-
-        if ($this->isExpired($expiresAt)) {
-            unlink($path);
-            return null;
-        }
-
-        return ['value' => $decoded['value'], 'expiresAt' => $expiresAt];
+        return $decoded;
     }
 
     /**

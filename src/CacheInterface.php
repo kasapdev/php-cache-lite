@@ -32,9 +32,11 @@ interface CacheInterface
      *                                    and the driver supports TTL, then the library may set a
      *                                    default value for it or let the driver take care of that.
      *                                    A ttl of 0 or a negative value means the item is already expired.
+     * @param string[] $tags Optional. A list of tags to associate with this entry, so it can later
+     *                       be removed in bulk via invalidateTag(). Defaults to no tags.
      * @return bool True on success and false on failure.
      */
-    public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null): bool;
+    public function set(string $key, mixed $value, null|int|\DateInterval $ttl = null, array $tags = []): bool;
 
     /**
      * Delete an item from the cache by its unique key.
@@ -84,4 +86,12 @@ interface CacheInterface
      * @return bool True if the items were successfully removed. False if there was an error.
      */
     public function deleteMultiple(iterable $keys): bool;
+
+    /**
+     * Removes every cached entry that was stored with the given tag.
+     *
+     * @param string $tag The tag to invalidate.
+     * @return int The number of entries that were removed.
+     */
+    public function invalidateTag(string $tag): int;
 }
