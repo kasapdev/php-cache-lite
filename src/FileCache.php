@@ -21,6 +21,7 @@ namespace Kasapdev\CacheLite;
 final class FileCache implements CacheInterface
 {
     use TtlNormalizer;
+    use Remember;
 
     private readonly string $directory;
 
