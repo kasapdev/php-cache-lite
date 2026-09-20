@@ -94,4 +94,19 @@ interface CacheInterface
      * @return int The number of entries that were removed.
      */
     public function invalidateTag(string $tag): int;
+
+    /**
+     * Returns the cached value for $key; on a miss (absent or expired), calls
+     * $callback, stores its result under $key with the given TTL and tags, and
+     * returns it. A cached `null` or `false` is a hit, so the callback is not
+     * re-run for it. If $callback throws, nothing is stored and the exception
+     * propagates.
+     *
+     * @param string $key The cache key.
+     * @param null|int|\DateInterval $ttl Time to live for a freshly computed value, as in set().
+     * @param callable $callback Produces the value on a miss; receives no arguments.
+     * @param string[] $tags Tags to store a freshly computed value with, as in set().
+     * @return mixed The cached or freshly computed value.
+     */
+    public function remember(string $key, null|int|\DateInterval $ttl, callable $callback, array $tags = []): mixed;
 }

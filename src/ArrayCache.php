@@ -18,6 +18,7 @@ namespace Kasapdev\CacheLite;
 final class ArrayCache implements CacheInterface
 {
     use TtlNormalizer;
+    use Remember;
 
     /**
      * @var array<string, array{value: mixed, expiresAt: int|null, tags: string[]}>

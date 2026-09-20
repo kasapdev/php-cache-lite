@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.3.0] - 2026-09-20
+
+### Added
+
+- `remember(string $key, null|int|\DateInterval $ttl, callable $callback, array $tags = []): mixed`
+  on `CacheInterface`, implemented by both `ArrayCache` and `FileCache` through
+  a shared `Remember` trait. It returns the cached value, or on a miss runs
+  `$callback`, stores the result (with the given TTL and tags) and returns it.
+  A cached `null` or `false` counts as a hit, and if the callback throws
+  nothing is stored. Note for custom `CacheInterface` implementations: the
+  interface gained this method, so they need to implement it (or
+  `use Remember;`).
+
 ## [1.2.0] - 2026-09-07
 
 ### Added

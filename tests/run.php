@@ -11,6 +11,7 @@ function check(string $label, bool $condition): void {
 
 require_once __DIR__ . '/../src/CacheInterface.php';
 require_once __DIR__ . '/../src/TtlNormalizer.php';
+require_once __DIR__ . '/../src/Remember.php';
 require_once __DIR__ . '/../src/ArrayCache.php';
 require_once __DIR__ . '/../src/FileCache.php';
 
@@ -354,6 +355,48 @@ check('FileCache: invalidateTag() leaves the backing file for a non-matching ent
 check('FileCache: the surviving entry is still retrievable with its original value', $tagFileCache->get('post:3') === 'c');
 
 rrmdir($tagFileCacheDir);
+
+// ---------------------------------------------------------------------
+// remember()
+// ---------------------------------------------------------------------
+
+foreach (makeBackends($tmpBaseDir) as [$name, $cache]) {
+    $calls = 0;
+    $compute = function () use (&$calls) { $calls++; return 'computed'; };
+
+    check("$name: remember() computes and returns the value on a miss", $cache->remember('r1', 60, $compute) === 'computed');
+    check("$name: remember() stores the computed value", $cache->get('r1') === 'computed');
+    check("$name: remember() does not re-run the callback on a hit", $cache->remember('r1', 60, $compute) === 'computed' && $calls === 1);
+
+    $cache->set('existing', 'old');
+    check("$name: remember() returns an existing value without calling the callback", $cache->remember('existing', 60, function () { throw new \LogicException('must not run'); }) === 'old');
+
+    $nullCalls = 0;
+    $falseCalls = 0;
+    $cache->remember('n', null, function () use (&$nullCalls) { $nullCalls++; return null; });
+    $cache->remember('n', null, function () use (&$nullCalls) { $nullCalls++; return null; });
+    $cache->remember('f', null, function () use (&$falseCalls) { $falseCalls++; return false; });
+    $falseResult = $cache->remember('f', null, function () use (&$falseCalls) { $falseCalls++; return true; });
+    check("$name: remember() treats a cached null as a hit", $nullCalls === 1);
+    check("$name: remember() treats a cached false as a hit and returns it", $falseCalls === 1 && $falseResult === false);
+
+    $expiredCalls = 0;
+    $cache->remember('gone', 0, function () use (&$expiredCalls) { $expiredCalls++; return 'x'; });
+    $cache->remember('gone', 0, function () use (&$expiredCalls) { $expiredCalls++; return 'x'; });
+    check("$name: remember() with an immediately-expiring TTL recomputes each time", $expiredCalls === 2);
+
+    $thrown = false;
+    try {
+        $cache->remember('boom', 60, function () { throw new \RuntimeException('fail'); });
+    } catch (\RuntimeException $e) {
+        $thrown = true;
+    }
+    check("$name: remember() propagates a callback exception and stores nothing", $thrown && $cache->has('boom') === false);
+
+    $cache->remember('tagged', 60, fn () => 'v', ['grp']);
+    $removed = $cache->invalidateTag('grp');
+    check("$name: remember() stores the given tags so invalidateTag() removes the entry", $removed === 1 && $cache->has('tagged') === false);
+}
 
 // ---------------------------------------------------------------------
 // Cleanup

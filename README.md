@@ -187,6 +187,20 @@ are persisted as part of each entry's JSON body and `invalidateTag()` scans
 the cache directory's files to find and delete the matching ones; on
 `ArrayCache`, it's a simple scan over the in-memory entries.
 
+## Remember (get-or-compute)
+
+`remember()` collapses the usual "check the cache, compute on a miss, store it"
+dance into one call. The callback only runs when the key is absent or expired:
+
+```php
+$profile = $cache->remember('user:42:profile', 600, function () use ($db) {
+    return $db->loadProfile(42); // runs only on a miss
+}, tags: ['user:42']);
+```
+
+A cached `null` or `false` counts as a hit (the callback is not re-run for it),
+and if the callback throws, nothing is stored and the exception propagates.
+
 ## API
 
 ### `Kasapdev\CacheLite\CacheInterface`
@@ -202,6 +216,7 @@ the cache directory's files to find and delete the matching ones; on
 | `setMultiple(iterable $values, null\|int\|\DateInterval $ttl = null): bool` | Store several `key => value` pairs at once with a shared TTL. |
 | `deleteMultiple(iterable $keys): bool` | Remove several keys at once. |
 | `invalidateTag(string $tag): int` | Remove every entry stored with the given tag. Returns the number of entries removed. |
+| `remember(string $key, null\|int\|\DateInterval $ttl, callable $callback, array $tags = []): mixed` | Return the cached value, or on a miss run `$callback`, store its result (with `$ttl` and `$tags`) and return it. |
 
 ### `Kasapdev\CacheLite\ArrayCache`
 
